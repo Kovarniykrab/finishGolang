@@ -9,37 +9,46 @@ import (
 	_ "modernc.org/sqlite" // Драйвер SQLite
 )
 
-const dbFile = "shleduler.db"
+const dbFile = "scheduler.db" // Исправлено имя файла
 
 func InitDB() (*sql.DB, error) {
-	_, err := os.Stat(dbFile)
-	install := os.IsNotExist(err)
+	// Удалим старый файл БД, если он существует (для тестов)
+	if os.Getenv("GO_TEST") == "1" {
+		os.Remove(dbFile)
+	}
 
 	db, err := sql.Open("sqlite", dbFile)
 	if err != nil {
-		return nil, fmt.Errorf("Не удалось открыть базу данных: %v\n", err)
+		return nil, fmt.Errorf("не удалось открыть БД: %v", err) // Убрал \n
 	}
 
-	if install {
-		if err := createTable(db); err != nil {
-			return nil, fmt.Errorf("Не удалось создать таблицу: %v\n, err")
-		}
-		log.Println("База данных успешно создана")
+	// Всегда пытаемся создать таблицу (используем IF NOT EXISTS)
+	if err := createTable(db); err != nil {
+		db.Close() // Важно закрыть соединение при ошибке
+		return nil, fmt.Errorf("не удалось создать таблицу: %v", err)
 	}
 
+	// Проверяем соединение с БД
+	if err := db.Ping(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("проверка соединения с БД не удалась: %v", err)
+	}
+
+	log.Println("База данных успешно инициализирована")
 	return db, nil
 }
 
 func createTable(db *sql.DB) error {
 	query := `
-	CREATE TABLE scheduler (
-	        id INTEGER PRIMARY KEY AUTOINCREMENT,
-			date TEXT NOT NULL,
-			title TEXT NOT NULL,
-			comment TEXT,
-			repeat TEXT
-			);
-			CREATE INDEX idx_date ON scheduler(date);`
+	CREATE TABLE IF NOT EXISTS scheduler (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		date TEXT NOT NULL,
+		title TEXT NOT NULL,
+		comment TEXT,
+		repeat TEXT
+	);
+	
+	CREATE INDEX IF NOT EXISTS idx_date ON scheduler(date);`
 
 	_, err := db.Exec(query)
 	return err

@@ -6,9 +6,8 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/yourusername/finishGolang/pkg/api"
-	"github.com/yourusername/finishGolang/pkg/db"
-	"github.com/yourusername/finishGolang/pkg/server"
+	"github.com/Kovarniykrab/finishGolang/pkg/db"
+	"github.com/Kovarniykrab/finishGolang/pkg/server"
 )
 
 const defaultPort = 7540
@@ -21,12 +20,9 @@ func main() {
 	}
 	defer database.Close()
 
-	// Регистрация API обработчиков
-	api.RegisterHandlers(database)
-
 	// Получаем порт и запускаем сервер
 	port := getPort()
-	if err := server.Start(port); err != nil {
+	if err := server.Start(port, database); err != nil {
 		fmt.Printf("Ошибка при запуске сервера: %v\n", err)
 		os.Exit(1)
 	}
