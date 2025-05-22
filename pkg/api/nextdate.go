@@ -12,63 +12,113 @@ import (
 const dateFormat = "20060102"
 
 // NextDate вычисляет следующую дату выполнения задачи
-func NextDate(now time.Time, dstart string, repeat string) (string, error) {
-	// Проверка на пустое правило
-	if repeat == "" {
-		return "", errors.New("пустое правило повторения")
-	}
+func NextDate(now time.Time, startDate string, rule string) (string, error) {
+	const dateLayout = "20060102"
 
 	// Парсинг начальной даты
-	date, err := time.Parse(dateFormat, dstart)
+	parsedDate, err := time.Parse(dateLayout, startDate)
 	if err != nil {
-		return "", fmt.Errorf("неверный формат начальной даты: %v", err)
+		return "", fmt.Errorf("invalid date format: %v", err)
 	}
 
-	// Разбиваем правило на части
-	parts := strings.Fields(repeat)
-	if len(parts) == 0 {
-		return "", errors.New("неверный формат правила")
+	// Обработка пустого правила
+	if strings.TrimSpace(rule) == "" {
+		return "", errors.New("repeat rule is required")
 	}
 
-	// Обработка разных типов правил
-	switch parts[0] {
-	case "d":
-		// Обработка ежедневного правила
+	// Определение типа правила
+	switch {
+	case rule == "y":
+		// Ежегодное повторение
+		next := parsedDate
+		for {
+			next = next.AddDate(1, 0, 0)
+
+			// Корректировка для 29 февраля
+			if next.Month() == time.February && next.Day() == 29 {
+				if !isLeap(next.Year()) {
+					next = time.Date(next.Year(), time.March, 1, 0, 0, 0, 0, time.UTC)
+				}
+			}
+
+			if next.After(now) {
+				return next.Format(dateLayout), nil
+			}
+		}
+
+	case strings.HasPrefix(rule, "d "):
+		// Ежедневное повторение
+		parts := strings.Split(rule, " ")
 		if len(parts) != 2 {
-			return "", errors.New("неверный формат ежедневного правила")
+			return "", errors.New("invalid daily rule format")
 		}
 
-		days, err := strconv.Atoi(parts[1])
-		if err != nil {
-			return "", fmt.Errorf("неверное количество дней: %v", err)
+		interval, err := strconv.Atoi(parts[1])
+		if err != nil || interval < 1 || interval > 400 {
+			return "", errors.New("invalid days interval (1-400)")
 		}
 
-		if days <= 0 || days > 400 {
-			return "", errors.New("количество дней должно быть от 1 до 400")
+		// Используем начальную дату как отправную точку
+		next := parsedDate
+		for {
+			if next.After(now) {
+				break
+			}
+			next = next.AddDate(0, 0, interval)
 		}
 
-		// Добавляем дни, пока не превысим текущую дату
-		for !date.After(now) {
-			date = date.AddDate(0, 0, days)
+		// Если начальная дата уже в будущем, возвращаем её
+		if parsedDate.After(now) {
+			return parsedDate.Format(dateLayout), nil
 		}
 
-	case "y":
-		// Обработка ежегодного правила
-		if len(parts) != 1 {
-			return "", errors.New("неверный формат ежегодного правила")
+		return next.Format(dateLayout), nil
+	case strings.HasPrefix(rule, "m "):
+		// Ежемесячное повторение
+		parts := strings.Split(rule, " ")
+		if len(parts) < 2 {
+			return "", errors.New("invalid monthly rule")
 		}
 
-		// Добавляем год, пока не превысим текущую дату
-		for !date.After(now) {
-			date = date.AddDate(1, 0, 0)
+		days := make([]int, 0)
+		for _, s := range parts[1:] {
+			day, err := strconv.Atoi(s)
+			if err != nil || day < 1 || day > 31 {
+				continue // Пропускаем невалидные дни
+			}
+			days = append(days, day)
+		}
+
+		if len(days) == 0 {
+			return "", errors.New("no valid days in monthly rule")
+		}
+
+		next := parsedDate
+		for {
+			next = next.AddDate(0, 1, 0)
+			lastDay := time.Date(next.Year(), next.Month()+1, 0, 0, 0, 0, 0, time.UTC).Day()
+
+			for _, d := range days {
+				currentDay := d
+				if currentDay > lastDay {
+					currentDay = lastDay
+				}
+
+				candidate := time.Date(next.Year(), next.Month(), currentDay, 0, 0, 0, 0, time.UTC)
+				if candidate.After(now) {
+					return candidate.Format(dateLayout), nil
+				}
+			}
 		}
 
 	default:
-		// Для остальных правил пока возвращаем ошибку
-		return "", errors.New("неподдерживаемый формат правила")
+		return "", errors.New("unsupported repeat rule")
 	}
+}
 
-	return date.Format(dateFormat), nil
+// Вспомогательная функция для определения високосного года
+func isLeap(year int) bool {
+	return year%4 == 0 && (year%100 != 0 || year%400 == 0)
 }
 
 // NextDateHandler обработчик для /api/nextdate

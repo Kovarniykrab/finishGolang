@@ -99,13 +99,16 @@ func TestAddTask(t *testing.T) {
 			"comment": v.comment,
 			"repeat":  v.repeat,
 		}, http.MethodPost)
+
 		assert.NoError(t, err)
 
 		e, ok := m["error"]
+		if !(!ok || len(fmt.Sprint(e)) == 0) {
+			fmt.Println(m)
+		}
 		assert.False(t, !ok || len(fmt.Sprint(e)) == 0,
 			"Ожидается ошибка для задачи %v", v)
 	}
-
 	now := time.Now()
 
 	check := func() {

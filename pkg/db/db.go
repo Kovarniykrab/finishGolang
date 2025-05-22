@@ -9,6 +9,8 @@ import (
 	_ "modernc.org/sqlite" // Драйвер SQLite
 )
 
+var DB *sql.DB
+
 const dbFile = "scheduler.db" // Исправлено имя файла
 
 func InitDB() (*sql.DB, error) {
@@ -24,18 +26,19 @@ func InitDB() (*sql.DB, error) {
 
 	// Всегда пытаемся создать таблицу (используем IF NOT EXISTS)
 	if err := createTable(db); err != nil {
-		db.Close() // Важно закрыть соединение при ошибке
-		return nil, fmt.Errorf("не удалось создать таблицу: %v", err)
+		return nil, fmt.Errorf("failed to create table: %v", err)
 	}
 
 	// Проверяем соединение с БД
 	if err := db.Ping(); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("проверка соединения с БД не удалась: %v", err)
+		return nil, fmt.Errorf("database connection failed: %v", err)
 	}
 
 	log.Println("База данных успешно инициализирована")
+
+	DB = db
 	return db, nil
+
 }
 
 func createTable(db *sql.DB) error {
