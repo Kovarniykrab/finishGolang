@@ -5,18 +5,11 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/Kovarniykrab/finishGolang/pkg/domain"
 )
 
-type Task struct {
-	ID      int64  `json:"id"`
-	Date    string `json:"date"`
-	Title   string `json:"title"`
-	Comment string `json:"comment"`
-	Repeat  string `json:"repeat"`
-}
-
-// Добавлен параметр *sql.DB
-func GetTasks(db *sql.DB, search string, limit int) ([]*Task, error) {
+func GetTasks(db *sql.DB, search string, limit int) ([]*domain.Task, error) {
 	query, args := buildQuery(search, limit)
 	rows, err := db.Query(query, args...)
 	if err != nil {
@@ -24,9 +17,9 @@ func GetTasks(db *sql.DB, search string, limit int) ([]*Task, error) {
 	}
 	defer rows.Close()
 
-	tasks := make([]*Task, 0)
+	tasks := make([]*domain.Task, 0)
 	for rows.Next() {
-		var t Task
+		var t domain.Task
 		if err := rows.Scan(&t.ID, &t.Date, &t.Title, &t.Comment, &t.Repeat); err != nil {
 			return nil, fmt.Errorf("row scan error: %v", err)
 		}

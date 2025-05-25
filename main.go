@@ -6,7 +6,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/Kovarniykrab/finishGolang/pkg/db"
+	"github.com/Kovarniykrab/finishGolang/pkg/database"
 	"github.com/Kovarniykrab/finishGolang/pkg/server"
 )
 
@@ -14,7 +14,7 @@ const defaultPort = 7540
 
 func main() {
 	// Инициализация БД
-	database, err := db.InitDB()
+	database, err := database.InitDB()
 	if err != nil {
 		log.Fatalf("Ошибка инициализации БД: %v", err)
 	}

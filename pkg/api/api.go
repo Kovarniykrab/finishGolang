@@ -10,12 +10,14 @@ import (
 	"strings"
 	"time"
 
-	db "github.com/Kovarniykrab/finishGolang/pkg/db/task"
+	"github.com/Kovarniykrab/finishGolang/pkg/domain"
+
+	"github.com/Kovarniykrab/finishGolang/pkg/database"
 )
 
 // TasksResp структура для ответа списка задач
 type TasksResp struct {
-	Tasks []*db.Task `json:"tasks"`
+	Tasks []*domain.Task `json:"tasks"`
 }
 
 // RegisterHandlers регистрирует все API обработчики
@@ -75,14 +77,14 @@ func tasksHandler(db *sql.DB) http.HandlerFunc {
 			limit = l
 		}
 
-		tasks, err := db.GetTasks(search, limit)
+		tasks, err := database.GetTasks(db, search, limit)
 		if err != nil {
 			sendJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Database error: %v", err))
 			return
 		}
 
 		if tasks == nil {
-			tasks = make([]*db.Task, 0)
+			tasks = make([]*domain.Task, 0)
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -99,7 +101,7 @@ func getTasksHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 
 func addTaskHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 
-	var task db.Task
+	var task domain.Task
 
 	if r.Method != http.MethodPost {
 		sendJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -186,7 +188,7 @@ func sendJSONError(w http.ResponseWriter, statusCode int, message string) {
 }
 
 func getTaskHandler(db *sql.DB, w http.ResponseWriter, r *http.Request, id int64) {
-	var task db.Task
+	var task domain.Task
 	err := db.QueryRow(
 		"SELECT id, date, title, comment, repeat FROM scheduler WHERE id = ?",
 		id,
@@ -208,7 +210,7 @@ func getTaskHandler(db *sql.DB, w http.ResponseWriter, r *http.Request, id int64
 }
 
 func updateTaskHandler(db *sql.DB, w http.ResponseWriter, r *http.Request, id int64) {
-	var task db.Task
+	var task domain.Task
 	if err := json.NewDecoder(r.Body).Decode(&task); err != nil {
 		sendJSONError(w, http.StatusBadRequest, "Invalid request body")
 		return
