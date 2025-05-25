@@ -13,6 +13,7 @@ const dateFormat = "20060102"
 
 // NextDate вычисляет следующую дату выполнения задачи
 func NextDate(now time.Time, startDate string, rule string) (string, error) {
+
 	const dateLayout = "20060102"
 
 	// Парсинг начальной даты
@@ -29,23 +30,20 @@ func NextDate(now time.Time, startDate string, rule string) (string, error) {
 	// Определение типа правила
 	switch {
 	case rule == "y":
-		// Ежегодное повторение
 		next := parsedDate
-		for {
+		maxIterations := 1000
+		for i := 0; i < maxIterations; i++ {
 			next = next.AddDate(1, 0, 0)
-
-			// Корректировка для 29 февраля
 			if next.Month() == time.February && next.Day() == 29 {
 				if !isLeap(next.Year()) {
 					next = time.Date(next.Year(), time.March, 1, 0, 0, 0, 0, time.UTC)
 				}
 			}
-
 			if next.After(now) {
 				return next.Format(dateLayout), nil
 			}
 		}
-
+		return "", errors.New("max iterations reached")
 	case strings.HasPrefix(rule, "d "):
 		// Ежедневное повторение
 		parts := strings.Split(rule, " ")
@@ -73,6 +71,7 @@ func NextDate(now time.Time, startDate string, rule string) (string, error) {
 		}
 
 		return next.Format(dateLayout), nil
+
 	case strings.HasPrefix(rule, "m "):
 		// Ежемесячное повторение
 		parts := strings.Split(rule, " ")

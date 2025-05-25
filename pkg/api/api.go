@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Kovarniykrab/finishGolang/pkg/db"
+	db "github.com/Kovarniykrab/finishGolang/pkg/db/task"
 )
 
 // TasksResp структура для ответа списка задач
@@ -23,6 +23,7 @@ func RegisterHandlers(mux *http.ServeMux, db *sql.DB) {
 	mux.HandleFunc("/api/nextdate", NextDateHandler)
 	mux.HandleFunc("/api/tasks", tasksHandler(db))
 	mux.HandleFunc("/api/task", func(w http.ResponseWriter, r *http.Request) {
+
 		switch r.Method {
 		case http.MethodGet:
 			getTasksHandler(db, w, r)
@@ -54,7 +55,6 @@ func RegisterHandlers(mux *http.ServeMux, db *sql.DB) {
 	})
 }
 
-// tasksHandler обработчик для /api/tasks
 func tasksHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -63,7 +63,17 @@ func tasksHandler(db *sql.DB) http.HandlerFunc {
 		}
 
 		search := r.URL.Query().Get("search")
+		limitStr := r.URL.Query().Get("limit")
 		limit := 50
+
+		if limitStr != "" {
+			l, err := strconv.Atoi(limitStr)
+			if err != nil || l < 1 {
+				sendJSONError(w, http.StatusBadRequest, "Invalid limit")
+				return
+			}
+			limit = l
+		}
 
 		tasks, err := db.GetTasks(search, limit)
 		if err != nil {
@@ -78,70 +88,30 @@ func tasksHandler(db *sql.DB) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(TasksResp{Tasks: tasks}); err != nil {
 			log.Printf("Failed to encode tasks response: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
 		}
 	}
 }
 
 func getTasksHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
-	rows, err := db.Query("SELECT id, date, title, comment, repeat FROM scheduler ORDER BY date")
-	if err != nil {
-		sendJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Database error: %v", err))
-		return
-	}
-	defer rows.Close()
-
-	var tasks []*db.Task
-	for rows.Next() {
-		var t db.Task
-		if err := rows.Scan(&t.ID, &t.Date, &t.Title, &t.Comment, &t.Repeat); err != nil {
-			sendJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Data scan error: %v", err))
-			return
-		}
-		tasks = append(tasks, &t)
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(TasksResp{Tasks: tasks}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
-	}
+	tasksHandler(db)(w, r)
 }
 
 func addTaskHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+
+	var task db.Task
+
 	if r.Method != http.MethodPost {
 		sendJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
-	var task db.Task
-	var err error
-
-	contentType := r.Header.Get("Content-Type")
-	now := time.Now().UTC()
-	today := now.Format("20060102")
-
-	if strings.Contains(contentType, "application/json") {
-		if err = json.NewDecoder(r.Body).Decode(&task); err != nil {
-			sendJSONError(w, http.StatusBadRequest, "Invalid JSON data")
-			return
-		}
-	} else {
-		if err = r.ParseForm(); err != nil {
-			sendJSONError(w, http.StatusBadRequest, "Invalid form data")
-			return
-		}
-
-		dateInput := r.FormValue("date")
-		if dateInput == "today" {
-			task.Date = today
-		} else {
-			task.Date = dateInput
-		}
-
-		task.Title = r.FormValue("title")
-		task.Comment = r.FormValue("comment")
-		task.Repeat = r.FormValue("repeat")
+	if err := json.NewDecoder(r.Body).Decode(&task); err != nil {
+		sendJSONError(w, http.StatusBadRequest, "Invalid JSON data")
+		return
 	}
 
+	// Валидация заголовка
 	if task.Title == "" {
 		sendJSONError(w, http.StatusBadRequest, "Title is required")
 		return
@@ -155,47 +125,38 @@ func addTaskHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	now := time.Now().UTC()
+	today := now.Format("20060102")
+
+	// Обработка даты
 	if task.Date == "" {
 		task.Date = today
-	}
-
-	parsedDate, err := time.Parse("20060102", task.Date)
-	if err != nil {
-		sendJSONError(w, http.StatusBadRequest, "Invalid date format (expected YYYYMMDD)")
-		return
-	}
-
-	if task.Repeat != "" {
-		startDate := task.Date
-		if r.FormValue("date") == "today" {
-			startDate = today
-		}
-
-		parsedStartDate, err := time.Parse("20060102", startDate)
+	} else {
+		// Проверка формата даты
+		_, err := time.Parse("20060102", task.Date)
 		if err != nil {
-			sendJSONError(w, http.StatusBadRequest, "Invalid start date format")
+			sendJSONError(w, http.StatusBadRequest, "Invalid date format (expected YYYYMMDD)")
 			return
 		}
+	}
 
-		nowTruncated := now.Truncate(24 * time.Hour)
-		startTruncated := parsedStartDate.Truncate(24 * time.Hour)
-
-		if startTruncated.Before(nowTruncated) {
-			next, err := NextDate(now, startDate, task.Repeat)
-			if err != nil {
-				sendJSONError(w, http.StatusBadRequest, "Invalid repeat rule: "+err.Error())
-				return
-			}
-			task.Date = next
-		} else {
-			task.Date = startDate
+	// Обработка повторяющихся задач
+	if task.Repeat != "" {
+		next, err := NextDate(now, task.Date, task.Repeat)
+		if err != nil {
+			sendJSONError(w, http.StatusBadRequest, "Invalid repeat rule: "+err.Error())
+			return
 		}
+		task.Date = next
 	} else {
+		// Для неповторяющихся задач проверяем, что дата не в прошлом
+		parsedDate, _ := time.Parse("20060102", task.Date)
 		if parsedDate.Before(now) {
 			task.Date = today
 		}
 	}
 
+	// Добавление задачи в БД
 	result, err := db.Exec(
 		"INSERT INTO scheduler (date, title, comment, repeat) VALUES (?, ?, ?, ?)",
 		task.Date, task.Title, task.Comment, task.Repeat,

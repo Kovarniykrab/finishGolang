@@ -1,6 +1,7 @@
 package db
 
 import (
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -14,10 +15,10 @@ type Task struct {
 	Repeat  string `json:"repeat"`
 }
 
-func GetTasks(search string, limit int) ([]*Task, error) {
+// Добавлен параметр *sql.DB
+func GetTasks(db *sql.DB, search string, limit int) ([]*Task, error) {
 	query, args := buildQuery(search, limit)
-
-	rows, err := DB.Query(query, args...)
+	rows, err := db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("database query error: %v", err)
 	}
@@ -26,14 +27,12 @@ func GetTasks(search string, limit int) ([]*Task, error) {
 	tasks := make([]*Task, 0)
 	for rows.Next() {
 		var t Task
-		err := rows.Scan(&t.ID, &t.Date, &t.Title, &t.Comment, &t.Repeat)
-		if err != nil {
+		if err := rows.Scan(&t.ID, &t.Date, &t.Title, &t.Comment, &t.Repeat); err != nil {
 			return nil, fmt.Errorf("row scan error: %v", err)
 		}
 		tasks = append(tasks, &t)
 	}
 
-	// Проверяем ошибки после итерации
 	if err = rows.Err(); err != nil {
 		return nil, fmt.Errorf("rows error: %v", err)
 	}
@@ -47,7 +46,6 @@ func buildQuery(search string, limit int) (string, []interface{}) {
 	args := []interface{}{}
 
 	if search != "" {
-		// Проверяем формат даты DD.MM.YYYY
 		if t, err := time.Parse("02.01.2006", search); err == nil {
 			where = append(where, "date = ?")
 			args = append(args, t.Format("20060102"))
