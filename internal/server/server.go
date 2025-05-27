@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/Kovarniykrab/finishGolang/pkg/api"
+	"github.com/Kovarniykrab/finishGolang/internal/api"
 )
 
 func Start(port int, db *sql.DB) error {

@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Kovarniykrab/finishGolang/pkg/domain"
-
-	"github.com/Kovarniykrab/finishGolang/pkg/database"
+	"github.com/Kovarniykrab/finishGolang/internal/database"
+	"github.com/Kovarniykrab/finishGolang/internal/domain"
+	"github.com/Kovarniykrab/finishGolang/internal/util"
 )
 
 // TasksResp структура для ответа списка задач
@@ -22,13 +22,11 @@ type TasksResp struct {
 
 // RegisterHandlers регистрирует все API обработчики
 func RegisterHandlers(mux *http.ServeMux, db *sql.DB) {
-	mux.HandleFunc("/api/nextdate", NextDateHandler)
+	mux.HandleFunc("/util/nextdate", util.NextDateHandler)
 	mux.HandleFunc("/api/tasks", tasksHandler(db))
-	mux.HandleFunc("/api/task", func(w http.ResponseWriter, r *http.Request) {
 
+	mux.HandleFunc("/api/task", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
-		case http.MethodGet:
-			getTasksHandler(db, w, r)
 		case http.MethodPost:
 			addTaskHandler(db, w, r)
 		default:
@@ -95,12 +93,7 @@ func tasksHandler(db *sql.DB) http.HandlerFunc {
 	}
 }
 
-func getTasksHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
-	tasksHandler(db)(w, r)
-}
-
 func addTaskHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
-
 	var task domain.Task
 
 	if r.Method != http.MethodPost {
@@ -114,6 +107,7 @@ func addTaskHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Валидация заголовка
+	task.Title = strings.TrimSpace(task.Title)
 	if task.Title == "" {
 		sendJSONError(w, http.StatusBadRequest, "Title is required")
 		return
@@ -122,21 +116,23 @@ func addTaskHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		sendJSONError(w, http.StatusBadRequest, "Title is too long (max 100 characters)")
 		return
 	}
+
+	// Валидация комментария
+	task.Comment = strings.TrimSpace(task.Comment)
 	if len(task.Comment) > 500 {
 		sendJSONError(w, http.StatusBadRequest, "Comment is too long (max 500 characters)")
 		return
 	}
 
+	// Обработка даты
 	now := time.Now().UTC()
 	today := now.Format("20060102")
 
-	// Обработка даты
 	if task.Date == "" {
 		task.Date = today
 	} else {
 		// Проверка формата даты
-		_, err := time.Parse("20060102", task.Date)
-		if err != nil {
+		if _, err := time.Parse("20060102", task.Date); err != nil {
 			sendJSONError(w, http.StatusBadRequest, "Invalid date format (expected YYYYMMDD)")
 			return
 		}
@@ -144,7 +140,8 @@ func addTaskHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 
 	// Обработка повторяющихся задач
 	if task.Repeat != "" {
-		next, err := NextDate(now, task.Date, task.Repeat)
+		task.Repeat = strings.TrimSpace(task.Repeat)
+		next, err := util.NextDate(now, task.Date, task.Repeat)
 		if err != nil {
 			sendJSONError(w, http.StatusBadRequest, "Invalid repeat rule: "+err.Error())
 			return
@@ -170,13 +167,13 @@ func addTaskHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 
 	id, err := result.LastInsertId()
 	if err != nil {
-		sendJSONError(w, http.StatusInternalServerError, "Failed to get ID")
+		sendJSONError(w, http.StatusInternalServerError, "Failed to get task ID")
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]int64{"id": id})
+	json.NewEncoder(w).Encode(map[string]string{"id": strconv.FormatInt(id, 10)})
 }
 
 func sendJSONError(w http.ResponseWriter, statusCode int, message string) {
@@ -210,29 +207,114 @@ func getTaskHandler(db *sql.DB, w http.ResponseWriter, r *http.Request, id int64
 }
 
 func updateTaskHandler(db *sql.DB, w http.ResponseWriter, r *http.Request, id int64) {
-	var task domain.Task
-	if err := json.NewDecoder(r.Body).Decode(&task); err != nil {
-		sendJSONError(w, http.StatusBadRequest, "Invalid request body")
+	var newValues struct {
+		Title   *string `json:"title"`
+		Date    *string `json:"date"`
+		Comment *string `json:"comment"`
+		Repeat  *string `json:"repeat"`
+	}
+
+	// Декодируем JSON
+	if err := json.NewDecoder(r.Body).Decode(&newValues); err != nil {
+		sendJSONError(w, http.StatusBadRequest, "Invalid JSON data")
 		return
 	}
 
-	var exists bool
-	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM scheduler WHERE id=?)", id).Scan(&exists)
-	if err != nil || !exists {
+	// Валидация Title
+	if newValues.Title != nil {
+		*newValues.Title = strings.TrimSpace(*newValues.Title)
+		if *newValues.Title == "" {
+			sendJSONError(w, http.StatusBadRequest, "Title cannot be empty")
+			return
+		}
+		if len(*newValues.Title) > 100 {
+			sendJSONError(w, http.StatusBadRequest, "Title too long (max 100 chars)")
+			return
+		}
+	}
+
+	// Валидация Comment
+	if newValues.Comment != nil {
+		*newValues.Comment = strings.TrimSpace(*newValues.Comment)
+		if len(*newValues.Comment) > 500 {
+			sendJSONError(w, http.StatusBadRequest, "Comment too long (max 500 chars)")
+			return
+		}
+	}
+
+	// Валидация Repeat и Date
+	if newValues.Repeat != nil {
+		now := time.Now().UTC()
+		currentDate := now.Format("20060102")
+
+		// Если обновляется дата - используем новое значение
+		if newValues.Date != nil {
+			currentDate = *newValues.Date
+		}
+
+		// Проверяем правило повтора
+		if _, err := util.NextDate(now, currentDate, *newValues.Repeat); err != nil {
+			sendJSONError(w, http.StatusBadRequest, "Invalid repeat rule: "+err.Error())
+			return
+		}
+	}
+
+	// Формируем SQL запрос
+	clauses := []string{}
+	params := []interface{}{}
+
+	if newValues.Title != nil {
+		clauses = append(clauses, "title=?")
+		params = append(params, *newValues.Title)
+	}
+
+	if newValues.Date != nil {
+		clauses = append(clauses, "date=?")
+		params = append(params, *newValues.Date)
+	}
+
+	if newValues.Comment != nil {
+		clauses = append(clauses, "comment=?")
+		params = append(params, *newValues.Comment)
+	}
+
+	if newValues.Repeat != nil {
+		clauses = append(clauses, "repeat=?")
+		params = append(params, *newValues.Repeat)
+	}
+
+	if len(clauses) == 0 {
+		sendJSONError(w, http.StatusBadRequest, "Nothing to update")
+		return
+	}
+
+	// Добавляем ID в параметры
+	params = append(params, id)
+
+	// Выполняем запрос
+	query := fmt.Sprintf("UPDATE scheduler SET %s WHERE id=?", strings.Join(clauses, ", "))
+	result, err := db.Exec(query, params...)
+	if err != nil {
+		sendJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Database error: %v", err))
+		return
+	}
+
+	// Проверяем обновление
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		sendJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Update check failed: %v", err))
+		return
+	}
+
+	if rowsAffected == 0 {
 		sendJSONError(w, http.StatusNotFound, "Task not found")
 		return
 	}
 
-	_, err = db.Exec(
-		"UPDATE scheduler SET date=?, title=?, comment=?, repeat=? WHERE id=?",
-		task.Date, task.Title, task.Comment, task.Repeat, id,
-	)
-	if err != nil {
-		sendJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Database update error: %v", err))
-		return
-	}
-
+	// Возвращаем успешный ответ
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(struct{ Success bool }{true})
 }
 
 func deleteTaskHandler(db *sql.DB, w http.ResponseWriter, r *http.Request, id int64) {

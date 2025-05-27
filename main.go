@@ -6,8 +6,8 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/Kovarniykrab/finishGolang/pkg/database"
-	"github.com/Kovarniykrab/finishGolang/pkg/server"
+	"github.com/Kovarniykrab/finishGolang/internal/database"
+	"github.com/Kovarniykrab/finishGolang/internal/server"
 )
 
 const defaultPort = 7540
