@@ -1,7 +1,6 @@
 package util
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -10,170 +9,130 @@ import (
 )
 
 const (
-	dateFormatYMD    = "20060102"
-	dateFormatDMYDot = "02.01.2006"
-	dateFormatYMDash = "2006-01-02"
+	DateFormat string = "20060102"
 )
 
-func NextDate(now time.Time, startDate string, rule string) (string, error) {
-	parsedDate, err := time.Parse(dateFormatYMD, startDate)
+func NextDate(now time.Time, date string, repeat string) (string, error) {
+	Start, err := time.Parse(DateFormat, date)
 	if err != nil {
-		return "", fmt.Errorf("invalid date format: %w", err)
+		return "", fmt.Errorf("неверный формат начальной даты: %v", err)
 	}
 
-	if strings.TrimSpace(rule) == "" {
-		return "", errors.New("repeat rule is required")
-	}
+	Repeat := strings.Split(repeat, " ")
 
-	ruleParts := strings.SplitN(rule, " ", 2)
-	switch ruleParts[0] {
-	case "y":
-		next := parsedDate
-		maxIterations := 1000
-		for i := 0; i < maxIterations; i++ {
-			next = next.AddDate(1, 0, 0)
-			if next.Month() == time.February && next.Day() == 29 && !isLeap(next.Year()) {
-				next = time.Date(next.Year(), time.March, 1, 0, 0, 0, 0, time.UTC)
+	if len(Repeat) != 0 {
+		switch Repeat[0] {
+		case "d":
+			if len(Repeat) < 2 {
+				return "", fmt.Errorf("неверный формат repeat для d: %s", repeat)
 			}
-			if next.After(now) {
-				return next.Format(dateFormatYMD), nil
+			days, err := strconv.Atoi(Repeat[1])
+			if err != nil || days > 400 || days < 1 {
+				return "", fmt.Errorf("неверное количество дней: %v", err)
 			}
-		}
-		return "", errors.New("max iterations reached")
-
-	case "d":
-		if len(ruleParts) < 2 {
-			return "", errors.New("invalid daily rule format")
-		}
-		interval, err := strconv.Atoi(ruleParts[1])
-		if err != nil || interval < 1 || interval > 400 {
-			return "", errors.New("invalid days interval (1-400)")
-		}
-
-		next := parsedDate
-		for i := 0; i < 400; i++ {
-			next = next.AddDate(0, 0, interval)
-			if next.After(now) {
-				return next.Format(dateFormatYMD), nil
+			Start = Start.AddDate(0, 0, days)
+			for Start.Format(DateFormat) <= now.Format(DateFormat) {
+				Start = Start.AddDate(0, 0, days)
 			}
-		}
-		return "", errors.New("max iterations reached")
-
-	case "w":
-		if len(ruleParts) < 2 {
-			return "", errors.New("invalid weekly rule format")
-		}
-		days, err := parseWeekdays(ruleParts[1])
-		if err != nil {
-			return "", err
-		}
-
-		next := parsedDate
-		for i := 0; i < 400; i++ {
-			next = next.AddDate(0, 0, 1)
-			if days[next.Weekday()] && next.After(now) {
-				return next.Format(dateFormatYMD), nil
+			return Start.Format(DateFormat), nil
+		case "y":
+			if len(Repeat) != 1 {
+				return "", fmt.Errorf("неверный формат repeat для y: %s", repeat)
 			}
-		}
-		return "", errors.New("next date not found")
+			Start = Start.AddDate(1, 0, 0)
+			for Start.Format(DateFormat) <= now.Format(DateFormat) {
+				Start = Start.AddDate(1, 0, 0)
+			}
+			return Start.Format(DateFormat), nil
+		case "w":
+			if len(Repeat) != 2 {
+				return "", fmt.Errorf("неверный формат repeat для w: %s", repeat)
+			}
+			week := strings.Split(Repeat[1], ",")
 
-	case "m":
-		if len(ruleParts) < 2 {
-			return "", errors.New("invalid monthly rule format")
-		}
-		days, months, err := parseMonthlyRule(ruleParts[1])
-		if err != nil {
-			return "", err
-		}
+			var targetDays []int
 
-		next := parsedDate
-		for i := 0; i < 365*3; i++ {
-			next = next.AddDate(0, 1, 0)
-			if len(months) > 0 && !contains(months, int(next.Month())) {
-				continue
+			for _, w := range week {
+				day, err := strconv.Atoi(w)
+				if err != nil || day < 1 || day > 7 {
+					return "", fmt.Errorf("неверный день недели: %v", err)
+				}
+				targetDays = append(targetDays, day)
 			}
 
-			lastDay := time.Date(next.Year(), next.Month()+1, 0, 0, 0, 0, 0, time.UTC).Day()
-			for _, d := range days {
-				targetDay := d
-				if targetDay < 0 {
-					targetDay = lastDay + targetDay + 1
-					if targetDay < 1 {
-						targetDay = 1
+			for {
+				weekDay := int(Start.Weekday())
+				if weekDay == 0 {
+					weekDay = 7
+				}
+
+				for _, day := range targetDays {
+					if weekDay == day && Start.Format(DateFormat) > now.Format(DateFormat) {
+						return Start.Format(DateFormat), nil
+					}
+				}
+				Start = Start.AddDate(0, 0, 1)
+			}
+		case "m":
+			if len(Repeat) < 2 {
+				return "", fmt.Errorf("неверный формат repeat для m: %s", repeat)
+			}
+
+			var months []int
+			if len(Repeat) > 2 {
+				monthStr := strings.Split(Repeat[2], ",")
+				for _, m := range monthStr {
+					month, err := strconv.Atoi(m)
+					if err != nil || month < 1 || month > 12 {
+						return "", fmt.Errorf("неверный месяц: %v", err)
+					}
+					months = append(months, month)
+				}
+			}
+
+			days := strings.Split(Repeat[1], ",")
+			for {
+				dayMatch := false
+				for _, d := range days {
+					day, err := strconv.Atoi(d)
+					if err != nil || day > 31 || day < -2 {
+						return "", fmt.Errorf("неверный день: %v", err)
+					}
+					if day < 0 {
+						lastDay := time.Date(Start.Year(), Start.Month()+1, 0, 0, 0, 0, 0, Start.Location()).Day()
+						calculatedDay := lastDay + day + 1
+						if calculatedDay < 1 {
+							return "", fmt.Errorf("некорректный день месяца: %d", calculatedDay)
+						}
+						day = calculatedDay
+					}
+					if Start.Day() == day {
+						dayMatch = true
+						break
 					}
 				}
 
-				if targetDay > lastDay {
-					targetDay = lastDay
+				monthMatched := len(months) == 0
+				for _, m := range months {
+					if int(Start.Month()) == m {
+						monthMatched = true
+						break
+					}
 				}
 
-				candidate := time.Date(next.Year(), next.Month(), targetDay, 0, 0, 0, 0, time.UTC)
-				if candidate.After(now) {
-					return candidate.Format(dateFormatYMD), nil
+				if dayMatch && monthMatched && Start.Format(DateFormat) > now.Format(DateFormat) {
+					return Start.Format(DateFormat), nil
 				}
+				Start = Start.AddDate(0, 0, 1)
+
 			}
-		}
-		return "", errors.New("next date not found")
 
-	default:
-		return "", errors.New("unsupported repeat rule")
-	}
-}
-
-func parseWeekdays(input string) (map[time.Weekday]bool, error) {
-	days := make(map[time.Weekday]bool)
-	for _, s := range strings.Split(input, ",") {
-		day, err := strconv.Atoi(s)
-		if err != nil || day < 0 || day > 6 {
-			return nil, fmt.Errorf("invalid weekday: %s (0-6, 0=Sunday)", s)
-		}
-		days[time.Weekday(day)] = true
-	}
-	return days, nil
-}
-
-func parseMonthlyRule(input string) ([]int, []int, error) {
-	parts := strings.Split(input, " ")
-	if len(parts) == 0 {
-		return nil, nil, errors.New("no days specified")
-	}
-
-	// Парсинг дней
-	var days []int
-	for _, s := range strings.Split(parts[0], ",") {
-		day, err := strconv.Atoi(s)
-		if err != nil || day < -31 || day > 31 || day == 0 {
-			return nil, nil, fmt.Errorf("invalid day value: %s", s)
-		}
-		days = append(days, day)
-	}
-
-	// Парсинг месяцев (опционально)
-	var months []int
-	if len(parts) > 1 {
-		for _, s := range strings.Split(parts[1], ",") {
-			month, err := strconv.Atoi(s)
-			if err != nil || month < 1 || month > 12 {
-				return nil, nil, fmt.Errorf("invalid month value: %s", s)
-			}
-			months = append(months, month)
+		default:
+			return "", fmt.Errorf("правило повторения указано в неправильном формате: %v", repeat)
 		}
 	}
 
-	return days, months, nil
-}
-
-func isLeap(year int) bool {
-	return year%4 == 0 && (year%100 != 0 || year%400 == 0)
-}
-
-func contains(slice []int, val int) bool {
-	for _, item := range slice {
-		if item == val {
-			return true
-		}
-	}
-	return false
+	return now.Format(DateFormat), nil
 }
 
 func NextDateHandler(w http.ResponseWriter, r *http.Request) {
@@ -191,7 +150,7 @@ func NextDateHandler(w http.ResponseWriter, r *http.Request) {
 		now = time.Now().UTC()
 	} else {
 		var err error
-		now, err = time.Parse(dateFormatYMD, nowStr)
+		now, err = time.Parse(DateFormat, nowStr)
 		if err != nil {
 			http.Error(w, "Invalid 'now' date format", http.StatusBadRequest)
 			return
