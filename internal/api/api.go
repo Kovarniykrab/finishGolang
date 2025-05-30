@@ -30,8 +30,7 @@ func RegisterHandlers(mux *http.ServeMux, db *sql.DB) {
 	mux.HandleFunc("/api/nextdate", util.NextDateHandler)
 	mux.HandleFunc("/api/tasks", tasksHandler(db))
 	mux.HandleFunc("/api/task", taskAll(dbs))
-
-	http.HandleFunc("/api/task/done", dbs.completedTaskHandler)
+	mux.HandleFunc("/api/task/done", dbs.completedTaskHandler)
 	// http.HandleFunc("/api/signin"
 
 }
@@ -88,19 +87,19 @@ func (d *DB) deleteHandler(w http.ResponseWriter, r *http.Request) {
 	idS := r.URL.Query().Get("id")
 	if idS == "" {
 		sendJSONError(w, http.StatusBadRequest, "id is required")
-		return // Добавлен return после ошибки
+		return
 	}
 	id, err := strconv.ParseInt(idS, 10, 64)
 	if err != nil {
 		sendJSONError(w, http.StatusBadRequest, "invalid id format")
-		return // Добавлен return после ошибки
+		return
 	}
 	if err := database.DeleteTaskStory(d.DB, id); err != nil {
 		sendJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	// Возвращаем пустой JSON {}
+	// Возвращаем {} вместо пустого тела
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(struct{}{}); err != nil {
 		log.Printf("Failed to encode response: %v", err)
